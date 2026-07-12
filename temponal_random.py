@@ -2,8 +2,7 @@
 """
 Temporal Random — генератор случайных чисел на основе временной нестабильности.
 
-Версия: 1.3.2
-Исправлено: неравномерное распределение (хи-квадрат тест пройден)
+Версия: 1.3.3
 
 Основан на простом принципе: ни одно действие не выполняется за одинаковое время.
 Разница во времени между операциями — это источник энтропии.
@@ -29,11 +28,12 @@ import argparse
 import sys
 from typing import List, Any, Optional, Union
 
+
 class TemporalRandom:
     """
     Генератор случайных чисел на основе временной нестабильности.
     
-    Версия 1.3.2 — стабильный релиз:
+    Версия 1.3.3 — стабильный релиз:
         - Хэширование SHA-256 для равномерности
         - Накопление энтропии между вызовами
         - Перемешивание битов
@@ -168,9 +168,11 @@ class TemporalRandom:
         Returns:
             float: число от 0 до 1 (не включая 1)
         """
-        value = self._measure_delta()
-        mantissa = value & 0xFFFFFFFFFFFFF
-        return mantissa / (1 << 53)
+        # Генерируем два 32-битных числа для лучшего распределения
+        high = self._measure_delta() & 0xFFFFFFFF
+        low = self._measure_delta() & 0xFFFFFFFF
+        value = (high << 32) | low
+        return value / (1 << 64)
     
     def random_choice(self, items: List[Any]) -> Any:
         """
@@ -315,7 +317,17 @@ class TemporalRandom:
         """Возвращает статистику работы генератора."""
         with self._lock:
             if not self._history:
-                return {"count": 0}
+                return {
+                    "count": 0,
+                    "mean_ns": 0.0,
+                    "min_ns": 0,
+                    "max_ns": 0,
+                    "range_ns": 0,
+                    "T": 0.0,
+                    "T_percent": 0.0,
+                    "seed_mode": self._use_seed,
+                    "seed": self._seed if self._use_seed else None
+                }
             
             deltas = self._history
             mean = sum(deltas) / len(deltas)
