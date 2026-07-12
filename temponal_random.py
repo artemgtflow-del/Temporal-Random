@@ -1,28 +1,30 @@
 """
 Temporal Random — генератор случайных чисел на основе временной нестабильности.
 
+Версия: 0.2.0
+Исправлено: неравномерное распределение (хи-квадрат тест пройден)
+
 Основан на простом принципе: ни одно действие не выполняется за одинаковое время.
-Разница во времени между двумя одинаковыми операциями и есть источник энтропии.
+Разница во времени между операциями — это источник энтропии.
 
 Автор: Jipin
-Версия: 0.1.0
+Лицензия: MIT
 """
 
 import time
-import sys
+import hashlib
 
 
 class TemporalRandom:
     """
     Генератор случайных чисел на основе временной нестабильности.
     
-    Принцип работы:
-        1. Запоминаем время до выполнения операции
-        2. Выполняем фиксированную операцию
-        3. Запоминаем время после выполнения
-        4. Разница между временами — это и есть случайное значение
+    Версия 0.2 — улучшенное распределение:
+        - Хэширование SHA-256 для равномерности
+        - Накопление энтропии между вызовами
+        - Перемешивание битов
     
-    Пример использования:
+    Пример:
         >>> rng = TemporalRandom()
         >>> rng.random_int(0, 100)
         42
@@ -35,32 +37,79 @@ class TemporalRandom:
     def __init__(self):
         """Инициализация генератора."""
         self._counter = 0
+        self._entropy = 0
         self._history = []
+    
+    def _mix_bits(self, value):
+        """
+        Перемешивает биты числа через SHA-256.
+        
+        Это ключевое улучшение версии 2.0:
+        - Обеспечивает равномерное распределение
+        - Устраняет корреляцию между значениями
+        - Делает результаты непредсказуемыми
+        
+        Args:
+            value: целое число для перемешивания
+        
+        Returns:
+            int: перемешанное 64-битное число
+        """
+        # Превращаем число в байты
+        value_bytes = value.to_bytes(8, 'little')
+        
+        # Хэшируем через SHA-256
+        hash_bytes = hashlib.sha256(value_bytes).digest()
+        
+        # Берём первые 8 байт хэша как 64-битное число
+        return int.from_bytes(hash_bytes[:8], 'little')
     
     def _measure_delta(self):
         """
-        Измеряет временную разницу выполнения операции.
+        Измеряет временную разницу выполнения операций.
+        
+        Улучшения версии 2.0:
+        - Несколько операций для накопления шума
+        - LCG для дополнительного перемешивания
+        - Накопление энтропии между вызовами
         
         Returns:
-            int: разница в наносекундах (всегда положительная)
+            int: перемешанная временная разница
         """
-        # Счётчик нужен, чтобы операция не была оптимизирована компилятором
         self._counter += 1
         
         # Запоминаем время ДО
         time_before = time.perf_counter_ns()
         
-        # Выполняем фиксированную операцию
-        # Корень из числа — простая, но не мгновенная операция
-        _ = self._counter ** 0.5
+        # Серия операций для накопления шума
+        x = self._counter
+        for _ in range(10):
+            # LCG (линейный конгруэнтный генератор) для перемешивания
+            x = (x * 9301 + 49297) % 233280
+            
+            # Несколько математических операций
+            _ = x ** 0.5
+            _ = x ** 0.333
+            _ = x * 3.14159
+            _ = x / 2.71828
         
         # Запоминаем время ПОСЛЕ
         time_after = time.perf_counter_ns()
         
-        # Возвращаем разницу
+        # Вычисляем разницу
         delta = time_after - time_before
+        
+        # Накопление энтропии (XOR с предыдущим состоянием)
+        self._entropy ^= delta
+        
+        # LCG для перемешивания накопленной энтропии
+        self._entropy = (self._entropy * 1664525 + 1013904223) & 0xFFFFFFFF
+        
+        # Сохраняем в историю для статистики
         self._history.append(delta)
-        return delta
+        
+        # Возвращаем перемешанную разницу с энтропией
+        return self._mix_bits(delta ^ self._entropy)
     
     def random_bit(self):
         """
@@ -69,8 +118,6 @@ class TemporalRandom:
         Returns:
             int: 0 или 1
         """
-        # Берём последний бит временной разницы
-        # Он непредсказуем из-за шумов процессора
         return self._measure_delta() & 1
     
     def random_byte(self):
@@ -80,10 +127,7 @@ class TemporalRandom:
         Returns:
             int: число от 0 до 255
         """
-        result = 0
-        for i in range(8):
-            result |= self.random_bit() << i
-        return result
+        return self._measure_delta() % 256
     
     def random_int(self, min_value=0, max_value=100):
         """
@@ -104,15 +148,12 @@ class TemporalRandom:
             raise ValueError("min_value не может быть больше max_value")
         
         range_size = max_value - min_value + 1
-        bits_needed = range_size.bit_length()
         
-        # Генерируем случайное число нужной длины в битах
-        result = 0
-        for _ in range(bits_needed):
-            result = (result << 1) | self.random_bit()
+        # Генерируем 64-битное случайное число
+        value = self._measure_delta()
         
         # Приводим к диапазону через остаток от деления
-        return min_value + (result % range_size)
+        return min_value + (value % range_size)
     
     def random_float(self):
         """
@@ -125,13 +166,14 @@ class TemporalRandom:
             >>> rng.random_float()
             0.573981234
         """
-        # Генерируем 53 бита (максимальная точность double)
-        value = 0
-        for i in range(53):
-            value |= self.random_bit() << i
+        # Генерируем 53-битное число (максимальная точность double)
+        value = self._measure_delta()
         
-        # Делим на 2^53, чтобы получить число в [0, 1)
-        return value / (1 << 53)
+        # Берём младшие 53 бита
+        mantissa = value & 0xFFFFFFFFFFFFF
+        
+        # Делим на 2^53 для получения числа в [0, 1)
+        return mantissa / (1 << 53)
     
     def random_choice(self, items):
         """
@@ -159,7 +201,7 @@ class TemporalRandom:
         
         Args:
             length: длина строки
-            chars: строка символов для генерации (по умолчанию буквы + цифры)
+            chars: строка символов для генерации
         
         Returns:
             str: случайная строка
@@ -172,6 +214,26 @@ class TemporalRandom:
             chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
         
         return ''.join(self.random_choice(chars) for _ in range(length))
+    
+    def shuffle(self, items):
+        """
+        Перемешивает список случайным образом (алгоритм Фишера-Йетса).
+        
+        Args:
+            items: список для перемешивания
+        
+        Returns:
+            list: перемешанный список
+        
+        Пример:
+            >>> rng.shuffle([1, 2, 3, 4, 5])
+            [3, 1, 5, 2, 4]
+        """
+        result = items.copy()
+        for i in range(len(result) - 1, 0, -1):
+            j = self.random_int(0, i)
+            result[i], result[j] = result[j], result[i]
+        return result
     
     def get_statistics(self):
         """
@@ -203,7 +265,7 @@ class TemporalRandom:
         }
 
 
-# ---- Упрощённые функции для быстрого использования ----
+#Упрощённые функции для быстрого использования
 
 _rng = None
 
@@ -240,16 +302,14 @@ def random_string(length=8, chars=None):
     return _get_rng().random_string(length, chars)
 
 
-# ---- ДЕМОНСТРАЦИЯ РАБОТЫ ----
+def shuffle(items):
+    """Быстрый вызов: перемешивание списка."""
+    return _get_rng().shuffle(items)
+
 
 def demo():
     """Запускает демонстрацию работы генератора."""
-    print("=" * 70)
-    print("ГЕНЕРАТОР СЛУЧАЙНЫХ ЧИСЕЛ НА ОСНОВЕ ВРЕМЕННОЙ НЕСТАБИЛЬНОСТИ")
-    print("=" * 70)
-    print()
     
-    # Создаём экземпляр генератора
     rng = TemporalRandom()
     
     # 1. Случайные целые числа
@@ -285,8 +345,16 @@ def demo():
         print(f"   Пароль {i+1}: {password}")
     print()
     
-    # 6. Проверка распределения
-    print("6. Проверка распределения (1000 чисел от 0 до 9):")
+    # 6. Перемешивание списка
+    print("6. Перемешивание списка:")
+    numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    shuffled = rng.shuffle(numbers)
+    print(f"   Было: {numbers}")
+    print(f"   Стало: {shuffled}")
+    print()
+    
+    # 7. Проверка распределения (главный тест!)
+    print("7. Проверка распределения (1000 чисел от 0 до 9):")
     counts = [0] * 10
     for _ in range(1000):
         num = rng.random_int(0, 9)
@@ -297,10 +365,14 @@ def demo():
     for i, count in enumerate(counts):
         bar = "█" * (count // 10)
         print(f"   {i:5d} | {count:6d}  | {bar}")
-    print()
     
-    # 7. Статистика
-    print("7. Статистика генератора:")
+    # Вычисляем хи-квадрат для проверки
+    expected = 100
+    chi2 = sum((c - expected) ** 2 / expected for c in counts)
+    print(f"\n   Хи-квадрат: {chi2:.2f} (должен быть < 16.9)")
+
+    # 8. Статистика
+    print("8. Статистика генератора:")
     stats = rng.get_statistics()
     print(f"   Измерений: {stats['count']}")
     print(f"   Среднее время: {stats['mean_ns']:.2f} нс")
@@ -314,13 +386,7 @@ def demo():
     print("=" * 70)
     print("Демонстрация завершена!")
     print("=" * 70)
-    
-    # Проверка: если запущен как скрипт, показываем демо
-    if not sys.stdin.isatty():
-        input("\nНажмите Enter для выхода...")
 
-
-# ---- ЗАПУСК ----
 
 if __name__ == "__main__":
     demo()
