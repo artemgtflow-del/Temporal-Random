@@ -27,7 +27,7 @@ from temporal_random import TemporalRandom
 
 rng = TemporalRandom()
 print(rng.random_int(0, 100))
-
+```
 EN
 
 # Temporal-Random
