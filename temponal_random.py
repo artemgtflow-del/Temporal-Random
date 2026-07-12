@@ -1,7 +1,7 @@
 """
 Temporal Random — генератор случайных чисел на основе временной нестабильности.
 
-Версия: 0.2.0
+Версия: 0.3.0
 Исправлено: неравномерное распределение (хи-квадрат тест пройден)
 
 Основан на простом принципе: ни одно действие не выполняется за одинаковое время.
@@ -13,6 +13,7 @@ Temporal Random — генератор случайных чисел на осн
 
 import time
 import hashlib
+import threading  # <--- ДОБАВЛЕНО
 
 
 class TemporalRandom:
@@ -39,6 +40,7 @@ class TemporalRandom:
         self._counter = 0
         self._entropy = 0
         self._history = []
+        self._lock = threading.Lock()  # <--- ДОБАВЛЕНО
     
     def _mix_bits(self, value):
         """
@@ -76,40 +78,41 @@ class TemporalRandom:
         Returns:
             int: перемешанная временная разница
         """
-        self._counter += 1
-        
-        # Запоминаем время ДО
-        time_before = time.perf_counter_ns()
-        
-        # Серия операций для накопления шума
-        x = self._counter
-        for _ in range(10):
-            # LCG (линейный конгруэнтный генератор) для перемешивания
-            x = (x * 9301 + 49297) % 233280
+        with self._lock:  # <--- ДОБАВЛЕНО
+            self._counter += 1
             
-            # Несколько математических операций
-            _ = x ** 0.5
-            _ = x ** 0.333
-            _ = x * 3.14159
-            _ = x / 2.71828
-        
-        # Запоминаем время ПОСЛЕ
-        time_after = time.perf_counter_ns()
-        
-        # Вычисляем разницу
-        delta = time_after - time_before
-        
-        # Накопление энтропии (XOR с предыдущим состоянием)
-        self._entropy ^= delta
-        
-        # LCG для перемешивания накопленной энтропии
-        self._entropy = (self._entropy * 1664525 + 1013904223) & 0xFFFFFFFF
-        
-        # Сохраняем в историю для статистики
-        self._history.append(delta)
-        
-        # Возвращаем перемешанную разницу с энтропией
-        return self._mix_bits(delta ^ self._entropy)
+            # Запоминаем время ДО
+            time_before = time.perf_counter_ns()
+            
+            # Серия операций для накопления шума
+            x = self._counter
+            for _ in range(10):
+                # LCG (линейный конгруэнтный генератор) для перемешивания
+                x = (x * 9301 + 49297) % 233280
+                
+                # Несколько математических операций
+                _ = x ** 0.5
+                _ = x ** 0.333
+                _ = x * 3.14159
+                _ = x / 2.71828
+            
+            # Запоминаем время ПОСЛЕ
+            time_after = time.perf_counter_ns()
+            
+            # Вычисляем разницу
+            delta = time_after - time_before
+            
+            # Накопление энтропии (XOR с предыдущим состоянием)
+            self._entropy ^= delta
+            
+            # LCG для перемешивания накопленной энтропии
+            self._entropy = (self._entropy * 1664525 + 1013904223) & 0xFFFFFFFF
+            
+            # Сохраняем в историю для статистики
+            self._history.append(delta)
+            
+            # Возвращаем перемешанную разницу с энтропией
+            return self._mix_bits(delta ^ self._entropy)
     
     def random_bit(self):
         """
@@ -242,30 +245,31 @@ class TemporalRandom:
         Returns:
             dict: статистика временных разниц
         """
-        if not self._history:
-            return {"count": 0}
-        
-        deltas = self._history
-        mean = sum(deltas) / len(deltas)
-        min_val = min(deltas)
-        max_val = max(deltas)
-        
-        # Вычисляем коэффициент нестабильности T
-        deviations = [abs(d - mean) / mean for d in deltas]
-        T = sum(deviations) / len(deviations)
-        
-        return {
-            "count": len(deltas),
-            "mean_ns": mean,
-            "min_ns": min_val,
-            "max_ns": max_val,
-            "range_ns": max_val - min_val,
-            "T": T,
-            "T_percent": T * 100
-        }
+        with self._lock:  # <--- ДОБАВЛЕНО
+            if not self._history:
+                return {"count": 0}
+            
+            deltas = self._history
+            mean = sum(deltas) / len(deltas)
+            min_val = min(deltas)
+            max_val = max(deltas)
+            
+            # Вычисляем коэффициент нестабильности T
+            deviations = [abs(d - mean) / mean for d in deltas]
+            T = sum(deviations) / len(deviations)
+            
+            return {
+                "count": len(deltas),
+                "mean_ns": mean,
+                "min_ns": min_val,
+                "max_ns": max_val,
+                "range_ns": max_val - min_val,
+                "T": T,
+                "T_percent": T * 100
+            }
 
 
-#Упрощённые функции для быстрого использования
+# Упрощённые функции для быстрого использования
 
 _rng = None
 
@@ -381,7 +385,7 @@ def demo():
     print(f"   Разброс: {stats['range_ns']} нс")
     print(f"   Коэффициент нестабильности T: {stats['T']:.6f}")
     print(f"   T × 100%: {stats['T_percent']:.4f}%")
-    print()
+ 
 
 if __name__ == "__main__":
     demo()
