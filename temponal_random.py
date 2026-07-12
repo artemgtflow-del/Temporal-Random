@@ -1,7 +1,7 @@
 """
 Temporal Random — генератор случайных чисел на основе временной нестабильности.
 
-Версия: 0.3.0
+Версия: 1.0.0
 Исправлено: неравномерное распределение (хи-квадрат тест пройден)
 
 Основан на простом принципе: ни одно действие не выполняется за одинаковое время.
@@ -13,17 +13,21 @@ Temporal Random — генератор случайных чисел на осн
 
 import time
 import hashlib
-import threading  # <--- ДОБАВЛЕНО
+import threading
+from typing import List, Any, Optional, Union
 
 
 class TemporalRandom:
     """
     Генератор случайных чисел на основе временной нестабильности.
     
-    Версия 0.2 — улучшенное распределение:
+    Версия 1.0.0 — стабильный релиз:
         - Хэширование SHA-256 для равномерности
         - Накопление энтропии между вызовами
         - Перемешивание битов
+        - Потокобезопасность
+        - Type hints
+        - Контекстный менеджер
     
     Пример:
         >>> rng = TemporalRandom()
@@ -40,13 +44,22 @@ class TemporalRandom:
         self._counter = 0
         self._entropy = 0
         self._history = []
-        self._lock = threading.Lock()  # <--- ДОБАВЛЕНО
+        self._lock = threading.Lock()
     
-    def _mix_bits(self, value):
+    def __enter__(self):
+        """Поддержка контекстного менеджера."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Очистка истории при выходе из контекста."""
+        self._history.clear()
+        return False
+    
+    def _mix_bits(self, value: int) -> int:
         """
         Перемешивает биты числа через SHA-256.
         
-        Это ключевое улучшение версии 2.0:
+        Это ключевое улучшение версии 1.0.0:
         - Обеспечивает равномерное распределение
         - Устраняет корреляцию между значениями
         - Делает результаты непредсказуемыми
@@ -66,19 +79,20 @@ class TemporalRandom:
         # Берём первые 8 байт хэша как 64-битное число
         return int.from_bytes(hash_bytes[:8], 'little')
     
-    def _measure_delta(self):
+    def _measure_delta(self) -> int:
         """
         Измеряет временную разницу выполнения операций.
         
-        Улучшения версии 2.0:
+        Улучшения версии 1.0.0:
         - Несколько операций для накопления шума
         - LCG для дополнительного перемешивания
         - Накопление энтропии между вызовами
+        - Потокобезопасность
         
         Returns:
             int: перемешанная временная разница
         """
-        with self._lock:  # <--- ДОБАВЛЕНО
+        with self._lock:
             self._counter += 1
             
             # Запоминаем время ДО
@@ -114,7 +128,7 @@ class TemporalRandom:
             # Возвращаем перемешанную разницу с энтропией
             return self._mix_bits(delta ^ self._entropy)
     
-    def random_bit(self):
+    def random_bit(self) -> int:
         """
         Возвращает случайный бит (0 или 1).
         
@@ -123,7 +137,7 @@ class TemporalRandom:
         """
         return self._measure_delta() & 1
     
-    def random_byte(self):
+    def random_byte(self) -> int:
         """
         Возвращает случайный байт (0-255).
         
@@ -132,18 +146,22 @@ class TemporalRandom:
         """
         return self._measure_delta() % 256
     
-    def random_int(self, min_value=0, max_value=100):
+    def random_int(self, min_value: int = 0, max_value: int = 100) -> int:
         """
         Возвращает случайное целое число в заданном диапазоне.
         
         Args:
-            min_value: минимальное значение (включительно)
-            max_value: максимальное значение (включительно)
+            min_value: минимальное значение (включительно). По умолчанию 0.
+            max_value: максимальное значение (включительно). По умолчанию 100.
         
         Returns:
             int: случайное число в диапазоне [min_value, max_value]
         
+        Raises:
+            ValueError: если min_value > max_value
+        
         Пример:
+            >>> rng = TemporalRandom()
             >>> rng.random_int(0, 10)
             7
         """
@@ -158,7 +176,7 @@ class TemporalRandom:
         # Приводим к диапазону через остаток от деления
         return min_value + (value % range_size)
     
-    def random_float(self):
+    def random_float(self) -> float:
         """
         Возвращает случайное число с плавающей точкой в диапазоне [0, 1).
         
@@ -166,6 +184,7 @@ class TemporalRandom:
             float: число от 0 до 1 (не включая 1)
         
         Пример:
+            >>> rng = TemporalRandom()
             >>> rng.random_float()
             0.573981234
         """
@@ -178,7 +197,7 @@ class TemporalRandom:
         # Делим на 2^53 для получения числа в [0, 1)
         return mantissa / (1 << 53)
     
-    def random_choice(self, items):
+    def random_choice(self, items: List[Any]) -> Any:
         """
         Выбирает случайный элемент из списка.
         
@@ -188,37 +207,55 @@ class TemporalRandom:
         Returns:
             element: случайный элемент из списка
         
+        Raises:
+            ValueError: если список пуст
+        
         Пример:
+            >>> rng = TemporalRandom()
             >>> rng.random_choice(['A', 'B', 'C'])
             'B'
         """
         if not items:
             raise ValueError("Список не может быть пустым")
         
+        if len(items) == 1:
+            return items[0]
+        
         index = self.random_int(0, len(items) - 1)
         return items[index]
     
-    def random_string(self, length=8, chars=None):
+    def random_string(self, length: int = 8, chars: Optional[str] = None) -> str:
         """
         Генерирует случайную строку заданной длины.
         
         Args:
-            length: длина строки
-            chars: строка символов для генерации
+            length: длина строки. По умолчанию 8.
+            chars: строка символов для генерации.
+                   По умолчанию A-Z, a-z, 0-9.
         
         Returns:
             str: случайная строка
         
+        Raises:
+            ValueError: если длина отрицательная
+        
         Пример:
+            >>> rng = TemporalRandom()
             >>> rng.random_string(10)
             'aB3dF7gH2j'
         """
+        if length < 0:
+            raise ValueError("Длина не может быть отрицательной")
+        
+        if length == 0:
+            return ""
+        
         if chars is None:
             chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
         
         return ''.join(self.random_choice(chars) for _ in range(length))
     
-    def shuffle(self, items):
+    def shuffle(self, items: List[Any]) -> List[Any]:
         """
         Перемешивает список случайным образом (алгоритм Фишера-Йетса).
         
@@ -229,6 +266,7 @@ class TemporalRandom:
             list: перемешанный список
         
         Пример:
+            >>> rng = TemporalRandom()
             >>> rng.shuffle([1, 2, 3, 4, 5])
             [3, 1, 5, 2, 4]
         """
@@ -238,14 +276,103 @@ class TemporalRandom:
             result[i], result[j] = result[j], result[i]
         return result
     
-    def get_statistics(self):
+    def sample(self, population: List[Any], k: int) -> List[Any]:
+        """
+        Возвращает случайную выборку из k элементов без повторений.
+        
+        Args:
+            population: список элементов
+            k: количество элементов в выборке
+        
+        Returns:
+            list: список из k случайных уникальных элементов
+        
+        Raises:
+            ValueError: если k > len(population) или k < 0
+        
+        Пример:
+            >>> rng = TemporalRandom()
+            >>> rng.sample([1, 2, 3, 4, 5], 3)
+            [3, 1, 5]
+        """
+        if k < 0:
+            raise ValueError("k не может быть отрицательным")
+        
+        if k > len(population):
+            raise ValueError("k не может быть больше длины списка")
+        
+        if k == 0:
+            return []
+        
+        if k == len(population):
+            return self.shuffle(population)
+        
+        result = population.copy()
+        for i in range(k):
+            j = self.random_int(i, len(result) - 1)
+            result[i], result[j] = result[j], result[i]
+        return result[:k]
+    
+    def randrange(self, start: int, stop: Optional[int] = None, step: int = 1) -> int:
+        """
+        Возвращает случайное число из диапазона range(start, stop, step).
+        
+        Аналог random.randrange().
+        
+        Args:
+            start: начало диапазона
+            stop: конец диапазона (не включая)
+            step: шаг
+        
+        Returns:
+            int: случайное число из диапазона
+        
+        Raises:
+            ValueError: если диапазон пустой или step = 0
+        
+        Пример:
+            >>> rng = TemporalRandom()
+            >>> rng.randrange(0, 10, 2)
+            6
+        """
+        if stop is None:
+            stop = start
+            start = 0
+        
+        if step == 0:
+            raise ValueError("step не может быть равен 0")
+        
+        if step == 1:
+            return self.random_int(start, stop - 1)
+        
+        # Для step > 1
+        range_size = (stop - start + step - 1) // step
+        if range_size <= 0:
+            raise ValueError("Пустой диапазон")
+        
+        return start + self.random_int(0, range_size - 1) * step
+    
+    def seed(self, value: Optional[int] = None) -> None:
+        """
+        Устанавливает начальное состояние генератора.
+        
+        В текущей реализации seed не используется,
+        так как генератор основан на временной нестабильности.
+        Метод оставлен для совместимости с интерфейсом random.Random.
+        
+        Args:
+            value: значение для инициализации (игнорируется)
+        """
+        pass
+    
+    def get_statistics(self) -> dict:
         """
         Возвращает статистику работы генератора.
         
         Returns:
             dict: статистика временных разниц
         """
-        with self._lock:  # <--- ДОБАВЛЕНО
+        with self._lock:
             if not self._history:
                 return {"count": 0}
             
@@ -267,13 +394,18 @@ class TemporalRandom:
                 "T": T,
                 "T_percent": T * 100
             }
+    
+    def clear_history(self) -> None:
+        """Очищает историю измерений."""
+        with self._lock:
+            self._history.clear()
 
 
-# Упрощённые функции для быстрого использования
+# ---- Упрощённые функции для быстрого использования ----
 
 _rng = None
 
-def _get_rng():
+def _get_rng() -> TemporalRandom:
     """Возвращает экземпляр генератора (синглтон)."""
     global _rng
     if _rng is None:
@@ -281,111 +413,41 @@ def _get_rng():
     return _rng
 
 
-def random_int(min_value=0, max_value=100):
+def random_int(min_value: int = 0, max_value: int = 100) -> int:
     """Быстрый вызов: случайное целое число."""
     return _get_rng().random_int(min_value, max_value)
 
 
-def random_float():
+def random_float() -> float:
     """Быстрый вызов: случайное число с плавающей точкой."""
     return _get_rng().random_float()
 
 
-def random_byte():
+def random_byte() -> int:
     """Быстрый вызов: случайный байт."""
     return _get_rng().random_byte()
 
 
-def random_choice(items):
+def random_choice(items: List[Any]) -> Any:
     """Быстрый вызов: случайный элемент из списка."""
     return _get_rng().random_choice(items)
 
 
-def random_string(length=8, chars=None):
+def random_string(length: int = 8, chars: Optional[str] = None) -> str:
     """Быстрый вызов: случайная строка."""
     return _get_rng().random_string(length, chars)
 
 
-def shuffle(items):
+def shuffle(items: List[Any]) -> List[Any]:
     """Быстрый вызов: перемешивание списка."""
     return _get_rng().shuffle(items)
 
 
-def demo():
-    """Запускает демонстрацию работы генератора."""
-    
-    rng = TemporalRandom()
-    
-    # 1. Случайные целые числа
-    print("1. Случайные целые числа (0-99):")
-    for i in range(10):
-        print(f"   {i+1:2d}. {rng.random_int(0, 99)}")
-    print()
-    
-    # 2. Случайные числа с плавающей точкой
-    print("2. Случайные числа с плавающей точкой (0-1):")
-    for i in range(5):
-        print(f"   {rng.random_float():.10f}")
-    print()
-    
-    # 3. Случайные байты
-    print("3. Случайные байты (0-255):")
-    for i in range(8):
-        byte = rng.random_byte()
-        print(f"   {byte:3d} = {byte:08b} (двоичный вид)")
-    print()
-    
-    # 4. Случайный выбор из списка
-    fruits = ["яблоко", "банан", "вишня", "дыня", "ежевика"]
-    print("4. Случайный выбор из списка:")
-    for i in range(5):
-        print(f"   Выбор {i+1}: {rng.random_choice(fruits)}")
-    print()
-    
-    # 5. Генерация паролей
-    print("5. Случайные пароли (длина 12 символов):")
-    for i in range(3):
-        password = rng.random_string(12)
-        print(f"   Пароль {i+1}: {password}")
-    print()
-    
-    # 6. Перемешивание списка
-    print("6. Перемешивание списка:")
-    numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    shuffled = rng.shuffle(numbers)
-    print(f"   Было: {numbers}")
-    print(f"   Стало: {shuffled}")
-    print()
-    
-    # 7. Проверка распределения (главный тест!)
-    print("7. Проверка распределения (1000 чисел от 0 до 9):")
-    counts = [0] * 10
-    for _ in range(1000):
-        num = rng.random_int(0, 9)
-        counts[num] += 1
-    
-    print("   Число | Частота | Визуализация")
-    print("   " + "-" * 40)
-    for i, count in enumerate(counts):
-        bar = "█" * (count // 10)
-        print(f"   {i:5d} | {count:6d}  | {bar}")
-    
-    # Вычисляем хи-квадрат для проверки
-    expected = 100
-    chi2 = sum((c - expected) ** 2 / expected for c in counts)
-    print(f"\n   Хи-квадрат: {chi2:.2f} (должен быть < 16.9)")
+def sample(population: List[Any], k: int) -> List[Any]:
+    """Быстрый вызов: случайная выборка."""
+    return _get_rng().sample(population, k)
 
-    # 8. Статистика
-    print("8. Статистика генератора:")
-    stats = rng.get_statistics()
-    print(f"   Измерений: {stats['count']}")
-    print(f"   Среднее время: {stats['mean_ns']:.2f} нс")
-    print(f"   Минимум: {stats['min_ns']} нс")
-    print(f"   Максимум: {stats['max_ns']} нс")
-    print(f"   Разброс: {stats['range_ns']} нс")
-    print(f"   Коэффициент нестабильности T: {stats['T']:.6f}")
-    print(f"   T × 100%: {stats['T_percent']:.4f}%")
- 
 
-if __name__ == "__main__":
-    demo()
+def randrange(start: int, stop: Optional[int] = None, step: int = 1) -> int:
+    """Быстрый вызов: случайное число из диапазона."""
+    return _get_rng().randrange(start, stop, step)
