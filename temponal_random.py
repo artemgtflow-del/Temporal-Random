@@ -382,11 +382,6 @@ def demo():
     print(f"   Коэффициент нестабильности T: {stats['T']:.6f}")
     print(f"   T × 100%: {stats['T_percent']:.4f}%")
     print()
-    
-    print("=" * 70)
-    print("Демонстрация завершена!")
-    print("=" * 70)
-
 
 if __name__ == "__main__":
     demo()
