@@ -1,6 +1,6 @@
 [![Python](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.3.3-brightgreen.svg)](https://github.com/твой-логин/temporal-random/releases)
+[![Version](https://img.shields.io/badge/version-1.3.3-brightgreen.svg)](https://github.com/artemgtflow-del/temporal-random/releases)
 
 # Temporal-Random
 
