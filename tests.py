@@ -466,18 +466,12 @@ class TestTemporalRandom(unittest.TestCase):
             self.assertEqual(b % 2, 0)
 
 if __name__ == "__main__":
-    print("=" * 70)
-    print("ЗАПУСК ТЕСТОВ ДЛЯ TEMPORAL RANDOM")
-    print("=" * 70)
-    print()
     
     # Запускаем тесты с подробным выводом
     test_runner = unittest.TextTestRunner(verbosity=2)
     test_suite = unittest.defaultTestLoader.loadTestsFromTestCase(TestTemporalRandom)
     result = test_runner.run(test_suite)
     
-    print()
-    print("=" * 70)
     if result.wasSuccessful():
         print("ВСЕ ТЕСТЫ ПРОЙДЕНЫ УСПЕШНО!")
     else:
@@ -485,4 +479,3 @@ if __name__ == "__main__":
         print(f"   Пройдено: {result.testsRun - len(result.failures) - len(result.errors)}")
         print(f"   Ошибок: {len(result.errors)}")
         print(f"   Провалов: {len(result.failures)}")
-    print("=" * 70)
